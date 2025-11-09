@@ -1,6 +1,6 @@
 
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from pydantic import BaseModel
 from DataSphere.storage.duckdb_storage import DuckDBStorage
 from DataSphere.coordination.redis_coordination import RedisCoordinator
@@ -12,12 +12,38 @@ import ray
 import json
 
 app = FastAPI()
-class ChatPipelineRequest(BaseModel):
-    prompt: str
+
+# Accept both JSON and multipart/form-data
+from typing import Optional
+
+def get_form_value(form, key, default=None):
+    v = form.get(key)
+    return v if v is not None else default
+
+
+from fastapi.responses import JSONResponse
+from fastapi import status
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 @app.post("/chat_pipeline")
-def chat_pipeline(req: ChatPipelineRequest):
-    # Use a prompt template to request structured JSON output
+async def chat_pipeline(
+    request: Request,
+    prompt: Optional[str] = Form(None),
+    data_source: Optional[str] = Form(None),
+    db_conn: Optional[str] = Form(None),
+    s3_path: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None)
+):
+    # Support both JSON and multipart
+    if request.headers.get("content-type", "").startswith("application/json"):
+        body = await request.json()
+        prompt = body.get("prompt")
+        data_source = body.get("data_source")
+        db_conn = body.get("db_conn")
+        s3_path = body.get("s3_path")
+        file = None
+    # else: use form/file params
+
     prompt_template = (
         "You are an AI pipeline orchestrator. "
         "Given a user request, break it down into a list of steps with actions and parameters. "
@@ -25,7 +51,7 @@ def chat_pipeline(req: ChatPipelineRequest):
         "User request: {user_prompt}\n"
         "Example output: [{{\"step\": \"ingest\", \"action\": \"trigger_airflow\", \"params\": {{\"dag\": \"test_agent_dag\"}}}}, {{\"step\": \"clean\", \"action\": \"run_ray_task\", \"params\": {{}}}}]"
     )
-    full_prompt = prompt_template.format(user_prompt=req.prompt)
+    full_prompt = prompt_template.format(user_prompt=prompt)
     hf_pipeline = pipeline("text-generation", model="distilgpt2")
     llm = HuggingFacePipeline(pipeline=hf_pipeline)
     plan = llm.invoke(full_prompt)
@@ -33,7 +59,6 @@ def chat_pipeline(req: ChatPipelineRequest):
     steps = []
     actions = []
     try:
-        # Extract only the first valid JSON array from the LLM output
         import re
         match = re.search(r'\[.*?\]', plan, re.DOTALL)
         if match:
@@ -44,11 +69,30 @@ def chat_pipeline(req: ChatPipelineRequest):
     except Exception as e:
         actions.append(f"[Parser] Could not parse plan as JSON: {e}")
         steps = []
+
+    # Save uploaded file if present
+    uploaded_file_path = None
+    if file is not None:
+        upload_dir = "uploaded_data"
+        os.makedirs(upload_dir, exist_ok=True)
+        uploaded_file_path = os.path.join(upload_dir, file.filename)
+        with open(uploaded_file_path, "wb") as f_out:
+            f_out.write(await file.read())
+        actions.append(f"[Upload] File saved to {uploaded_file_path}")
+
     # Execute orchestration for each step
     for step in steps:
         step_name = step.get("step", "").lower()
         action_type = step.get("action", "")
         params = step.get("params", {})
+        # Attach user data info to params for ingestion
+        if step_name == "ingest":
+            if data_source == "Upload File" and uploaded_file_path:
+                params["file_path"] = uploaded_file_path
+            elif data_source == "Database" and db_conn:
+                params["db_conn"] = db_conn
+            elif data_source == "S3" and s3_path:
+                params["s3_path"] = s3_path
         if action_type == "trigger_airflow":
             dag = params.get("dag", "test_agent_dag")
             try:
@@ -90,11 +134,9 @@ def chat_pipeline(req: ChatPipelineRequest):
             except Exception as e:
                 actions.append(f"[Redis] Error: {e}")
         elif action_type == "export_s3":
-            # Simulate S3 export
             bucket = params.get("bucket", "my-bucket")
             actions.append(f"[S3] Data exported to bucket: {bucket}")
         elif action_type == "notify":
-            # Simulate notification
             recipient = params.get("recipient", "team")
             actions.append(f"[Notify] Notification sent to: {recipient}")
         else:
