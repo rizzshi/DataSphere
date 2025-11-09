@@ -58,13 +58,41 @@ def chat_pipeline(req: ChatPipelineRequest):
             try:
                 ray.init(ignore_reinit_error=True)
                 @ray.remote
-                def clean_task():
+                def ray_task():
                     return f"[Ray] {step_name.capitalize()} task completed."
-                result = ray.get(clean_task.remote())
+                result = ray.get(ray_task.remote())
                 actions.append(result)
                 ray.shutdown()
             except Exception as e:
                 actions.append(f"[Ray] Error running {step_name} task: {e}")
+        elif action_type == "duckdb_query":
+            try:
+                from DataSphere.storage.duckdb_storage import DuckDBStorage
+                db = DuckDBStorage()
+                query = params.get("query", "SELECT 1")
+                result = db.query(query)
+                actions.append(f"[DuckDB] Query result: {result}")
+                db.close()
+            except Exception as e:
+                actions.append(f"[DuckDB] Error: {e}")
+        elif action_type == "redis_publish":
+            try:
+                from DataSphere.coordination.redis_coordination import RedisCoordinator
+                rc = RedisCoordinator()
+                channel = params.get("channel", "default")
+                message = params.get("message", "test")
+                rc.publish(channel, message)
+                actions.append(f"[Redis] Published to {channel}: {message}")
+            except Exception as e:
+                actions.append(f"[Redis] Error: {e}")
+        elif action_type == "export_s3":
+            # Simulate S3 export
+            bucket = params.get("bucket", "my-bucket")
+            actions.append(f"[S3] Data exported to bucket: {bucket}")
+        elif action_type == "notify":
+            # Simulate notification
+            recipient = params.get("recipient", "team")
+            actions.append(f"[Notify] Notification sent to: {recipient}")
         else:
             actions.append(f"[Simulated] {step_name.capitalize()} step: {action_type} with params {params}")
     return {
