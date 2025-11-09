@@ -33,10 +33,14 @@ def chat_pipeline(req: ChatPipelineRequest):
     steps = []
     actions = []
     try:
-        json_start = plan.find('[')
-        json_end = plan.rfind(']') + 1
-        plan_json = plan[json_start:json_end]
-        steps = json.loads(plan_json)
+        # Extract only the first valid JSON array from the LLM output
+        import re
+        match = re.search(r'\[.*?\]', plan, re.DOTALL)
+        if match:
+            plan_json = match.group(0)
+            steps = json.loads(plan_json)
+        else:
+            raise ValueError("No JSON array found in LLM output.")
     except Exception as e:
         actions.append(f"[Parser] Could not parse plan as JSON: {e}")
         steps = []
