@@ -1,10 +1,24 @@
 
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from DataSphere.storage.duckdb_storage import DuckDBStorage
 from DataSphere.coordination.redis_coordination import RedisCoordinator
+from langchain_community.llms import HuggingFacePipeline
+from transformers import pipeline
 
 app = FastAPI()
+class ChatPipelineRequest(BaseModel):
+    prompt: str
+
+@app.post("/chat_pipeline")
+def chat_pipeline(req: ChatPipelineRequest):
+    # Use a local HuggingFace LLM for demo (distilgpt2)
+    hf_pipeline = pipeline("text-generation", model="distilgpt2")
+    llm = HuggingFacePipeline(pipeline=hf_pipeline)
+    plan = llm.invoke(req.prompt)
+    # In a real system, parse 'plan' and trigger orchestration here
+    return {"pipeline_plan": plan}
 
 # Initialize storage and coordination (in production, use dependency injection)
 duckdb = DuckDBStorage()
