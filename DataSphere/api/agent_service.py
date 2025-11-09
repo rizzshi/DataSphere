@@ -42,30 +42,53 @@ async def chat_pipeline(
         file = None
     # else: use form/file params
 
+
+    # Improved prompt template for stricter JSON output
     prompt_template = (
-        "You are an AI pipeline orchestrator. "
-        "Given a user request, break it down into a list of steps with actions and parameters. "
-        "Return the result as a JSON list of steps, each with 'step', 'action', and 'params'.\n"
+        "You are an expert AI pipeline orchestrator. "
+        "Given a user request, break it down into a minimal list of steps. "
+        "Each step must be a JSON object with keys: 'step', 'action', and 'params'. "
+        "Return ONLY a valid JSON array, no extra text.\n"
         "User request: {user_prompt}\n"
-        "Example output: [{{\"step\": \"ingest\", \"action\": \"trigger_airflow\", \"params\": {{\"dag\": \"test_agent_dag\"}}}}, {{\"step\": \"clean\", \"action\": \"run_ray_task\", \"params\": {{}}}}]"
+        "Example output: ["
+        "  {{\"step\": \"ingest\", \"action\": \"trigger_airflow\", \"params\": {{\"dag\": \"test_agent_dag\"}}}},"
+        "  {{\"step\": \"clean\", \"action\": \"run_ray_task\", \"params\": {{}}}}"
+        "]"
     )
     full_prompt = prompt_template.format(user_prompt=prompt)
     hf_pipeline = pipeline("text-generation", model="distilgpt2")
     llm = HuggingFacePipeline(pipeline=hf_pipeline)
     plan = llm.invoke(full_prompt)
-    # Try to parse JSON from the LLM output
+
+    # Robust LLM output validation and error handling
     steps = []
     actions = []
-    try:
-        import re
-        match = re.search(r'\[.*?\]', plan, re.DOTALL)
-        if match:
-            plan_json = match.group(0)
-            steps = json.loads(plan_json)
+    import re
+    import ast
+    def try_parse_json(text):
+        try:
+            return json.loads(text)
+        except Exception:
+            try:
+                # Try to fix single quotes and trailing commas
+                text_fixed = re.sub(r"'", '"', text)
+                text_fixed = re.sub(r',\s*]', ']', text_fixed)
+                return json.loads(text_fixed)
+            except Exception:
+                return None
+
+    # Extract only the first valid JSON array from the LLM output
+    match = re.search(r'\[.*?\]', plan, re.DOTALL)
+    if match:
+        plan_json = match.group(0)
+        parsed = try_parse_json(plan_json)
+        if parsed and isinstance(parsed, list):
+            steps = parsed
         else:
-            raise ValueError("No JSON array found in LLM output.")
-    except Exception as e:
-        actions.append(f"[Parser] Could not parse plan as JSON: {e}")
+            actions.append(f"[Parser] LLM output JSON is malformed or not a list. Raw: {plan_json}")
+            steps = []
+    else:
+        actions.append(f"[Parser] No JSON array found in LLM output. Raw: {plan}")
         steps = []
 
     # Save uploaded file if present
