@@ -1,3 +1,4 @@
+## Redis-based coordination module for distributed systems.
 import redis
 from typing import Any
 
