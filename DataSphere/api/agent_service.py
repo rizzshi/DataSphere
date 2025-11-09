@@ -17,8 +17,25 @@ def chat_pipeline(req: ChatPipelineRequest):
     hf_pipeline = pipeline("text-generation", model="distilgpt2")
     llm = HuggingFacePipeline(pipeline=hf_pipeline)
     plan = llm.invoke(req.prompt)
-    # In a real system, parse 'plan' and trigger orchestration here
-    return {"pipeline_plan": plan}
+    # Simple keyword-based parsing for demo
+    steps = []
+    actions = []
+    plan_lower = plan.lower() if isinstance(plan, str) else str(plan).lower()
+    if "ingest" in plan_lower:
+        steps.append("ingest")
+        actions.append("[Simulated] Ingesting data...")
+    if "clean" in plan_lower:
+        steps.append("clean")
+        actions.append("[Simulated] Cleaning data...")
+    if "summar" in plan_lower:
+        steps.append("summarize")
+        actions.append("[Simulated] Running summary pipeline...")
+    # Simulate orchestration (replace with real triggers in production)
+    return {
+        "pipeline_plan": plan,
+        "parsed_steps": steps,
+        "actions": actions
+    }
 
 # Initialize storage and coordination (in production, use dependency injection)
 duckdb = DuckDBStorage()
