@@ -21,9 +21,7 @@ def get_form_value(form, key, default=None):
     return v if v is not None else default
 
 
-from fastapi.responses import JSONResponse
-from fastapi import status
-from starlette.datastructures import UploadFile as StarletteUploadFile
+import os
 
 @app.post("/chat_pipeline")
 async def chat_pipeline(
