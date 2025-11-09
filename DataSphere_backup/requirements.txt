@@ -1,7 +1,0 @@
-fastapi
-uvicorn
-langchain
-airflow
-duckdb
-redis
-ray
